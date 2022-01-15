@@ -1,1 +1,1 @@
-# Tick-Stack
+# Tick-Stack - Docker / Pine64
