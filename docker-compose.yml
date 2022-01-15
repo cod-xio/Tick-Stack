@@ -1,0 +1,159 @@
+version: '3.5'
+
+services:
+
+  management-center:
+    image: cedalo/management-center:2.0.0-arm32v7
+    container_name: MQTT-Management
+    environment:
+      CEDALO_MC_BROKER_ID: Admin
+      CEDALO_MC_BROKER_NAME: Config
+      CEDALO_MC_BROKER_URL: mqtt://mosquitto:1883
+      CEDALO_MC_BROKER_USERNAME: Admin
+      CEDALO_MC_BROKER_PASSWORD: wvFGVHSjcZ
+    volumes:
+      - ./Cedalo/config:/management-center/config   
+    ports:
+      - 8088:8088
+    depends_on:
+      - mosquitto
+    networks:
+      - tick-stack
+    restart: always
+    
+  mosquitto:
+    image: eclipse-mosquitto:2.0.13
+    container_name: MQTT
+    environment:
+      - TZ=Europe/Vienna
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    ports:
+      - "1883:1883"
+    networks:
+      - tick-stack
+    restart: always
+
+  telegraf:
+    image: telegraf:1.20.3
+    container_name: Telegraf
+    tty: true      
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock    
+      - ./Telegraf/config.d:/etc/telegraf/telegraf.d
+      - ./Telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    depends_on:
+      - influxdb_1
+      - influxdb_2     
+    links:
+      - influxdb_1
+      - influxdb_2
+    networks:
+      - tick-stack
+    restart: always    
+    
+  influxdb_1:
+    image: influxdb:1.8.4
+    container_name: InfluxDB-v1
+    environment:
+      # Admin_Enable
+      - INFLUXDB_HTTP_AUTH_ENABLED=false
+      - INFLUXDB_ADMIN_ENABLED=true
+      # Admin_Config
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=root
+      # User_Config
+      - INFLUXDB_DB=ESPEasy
+      - INFLUXDB_DB=ioBroker
+      - INFLUXDB_DB=Telegraf     
+      #- INFLUXDB_USER=ioBroker
+      #- INFLUXDB_USER_PASSWORD=ioBroker
+    healthcheck:
+      test: "wget --quiet --spider --tries=1 http://localhost:8086/ping || exit 1"
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 60s      
+    command: -config /etc/influxdb/influxdb.conf      
+    volumes:
+      - ./InfluxDB_1/influxdb.conf:/etc/influxdb/influxdb.conf:ro
+      - ./InfluxDB_1/data:/var/lib/influxdb
+    ports:
+      - '8086:8086'
+    networks:
+      - tick-stack
+    restart: always    
+
+  influxdb_2:
+    image: influxdb:2.1.1
+    container_name: InfluxDB-v2
+    environment:
+      - TZ=Europe/Vienna
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=Home-Lab
+      - DOCKER_INFLUXDB_INIT_ORG=Home-Lab
+      - DOCKER_INFLUXDB_INIT_BUCKET=Energy-tick-stack
+      - DOCKER_INFLUXDB_INIT_RETENTION=365d
+      #- DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=mySecretToken      
+    volumes:
+      - ./InfluxDB_2/config:/etc/influxdb2    
+      - ./InfluxDB_2/data:/var/lib/influxdb2
+    ports:
+      - '8087:8086'
+    networks:
+      - tick-stack
+    restart: always
+    
+  prometheus:
+    image: prom/prometheus:v2.31.1
+    container_name: Prometheus
+    hostname: prometheus      
+    environment:
+      - TZ=Europe/Vienna
+    volumes:
+      #- ./Prometheus/data:/prometheus
+      - ./Prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - 9091:9090
+    networks:
+      - tick-stack
+    restart: always
+
+  grafana:
+    image: grafana/grafana:8.2.4
+    container_name: Grafana
+    environment:
+      - TZ=Europe/Vienna
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      #- GF_SECURITY_SECRET_KEY=grafana
+      #- GF_USERS_ALLOW_SIGN_UP=true
+      #- GF_USERS_ALLOW_ORG_CREATE=true
+      #- GF_AUTH_ANONYMOUS_ENABLED=true
+      #- GF_AUTH_ANONYMOUS_ORG_NAME=grafana
+      #- GF_DASHBOARDS_JSON_ENABLED=true
+      #- GF_DASHBOARDS_JSON_PATH=/opt/grafana      
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      #- ./Grafana/config:/etc/grafana
+      - ./Grafana/data:/var/lib/grafana
+      - ./Grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      #- ./Grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - influxdb_1
+      - influxdb_2      
+    links:
+      - influxdb_1
+      - influxdb_2
+    ports:
+      - '3000:3000'
+    networks:
+      - tick-stack
+    restart: always  
+    
+networks:
+    tick-stack:
+        driver: bridge
